@@ -2,9 +2,16 @@ import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { ref, push, set, onValue, remove, update } from "firebase/database";
 
+const SECRET_KEY = "family2026secret";
+
 function App() {
   const params = new URLSearchParams(window.location.search);
   const childParam = params.get("child");
+  const key = params.get("key");
+
+  if (childParam && key !== SECRET_KEY) {
+    return <h1>アクセスできません</h1>;
+  }
 
   const [names, setNames] = useState({ A: "A", B: "B", C: "C" });
   const [period, setPeriod] = useState({ start: "", end: "" });
@@ -45,8 +52,9 @@ function App() {
     setPrice("");
   };
 
-  const deleteTask = (c, id) => remove(ref(db, `tasks/${c}/${id}`));
-  const updateTask = (c, id, p) => update(ref(db, `tasks/${c}/${id}`), { price: Number(p) });
+  const deleteTask = (c, id) => remove(ref(db, `tasks/${c}/${id}`);
+  const updateTask = (c, id, p) =>
+    update(ref(db, `tasks/${c}/${id}`), { price: Number(p) });
 
   const toggleRecord = (date, taskName) => {
     const exist = records.find(
@@ -104,43 +112,53 @@ function App() {
 
         <h2>名前</h2>
         {["A", "B", "C"].map((c) => (
-          <input key={c} value={names[c]} onChange={(e) => setNames({ ...names, [c]: e.target.value })} />
+          <input
+            key={c}
+            value={names[c]}
+            onChange={(e) =>
+              setNames({ ...names, [c]: e.target.value })
+            }
+          />
         ))}
         <button onClick={saveNames}>保存</button>
 
         <h2>期間</h2>
-        <input type="date" value={period.start} onChange={(e) => setPeriod({ ...period, start: e.target.value })} />
-        <input type="date" value={period.end} onChange={(e) => setPeriod({ ...period, end: e.target.value })} />
+        <input type="date" onChange={(e) =>
+          setPeriod({ ...period, start: e.target.value })
+        } />
+        <input type="date" onChange={(e) =>
+          setPeriod({ ...period, end: e.target.value })
+        } />
         <button onClick={savePeriod}>保存</button>
 
         <h2>宿題登録</h2>
         <select onChange={(e) => setChild(e.target.value)}>
           <option>A</option><option>B</option><option>C</option>
         </select>
-        <input value={task} onChange={(e) => setTask(e.target.value)} placeholder="宿題" />
-        <input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="単価" />
+        <input placeholder="宿題" onChange={(e) => setTask(e.target.value)} />
+        <input placeholder="単価" onChange={(e) => setPrice(e.target.value)} />
         <button onClick={addTask}>追加</button>
 
         {["A", "B", "C"].map((c) => {
           const progress = calcProgress(c);
           return (
-            <div key={c}>
+            <div key={c} style={{
+              border: "1px solid #ccc",
+              borderRadius: "10px",
+              padding: "10px",
+              margin: "10px"
+            }}>
               <h3>{names[c]}</h3>
 
-              {/* グラフ */}
-              <div style={{ background: "#eee", height: "20px", width: "100%" }}>
-                <div style={{ background: "green", width: progress + "%", height: "100%" }} />
+              <div style={{ background: "#eee", height: "20px" }}>
+                <div style={{
+                  width: progress + "%",
+                  background: "green",
+                  height: "100%"
+                }} />
               </div>
+
               <p>{progress}%</p>
-
-              {Object.entries(tasks[c]).map(([id, t]) => (
-                <div key={id}>
-                  {t.name}
-                  <input defaultValue={t.price} onBlur={(e) => updateTask(c, id, e.target.value)} />
-                  <button onClick={() => deleteTask(c, id)}>削除</button>
-                </div>
-              ))}
-
               <p>合計：{calcTotal(c)}円</p>
             </div>
           );
@@ -156,7 +174,7 @@ function App() {
     <div style={{ padding: 10 }}>
       <h1 style={{ textAlign: "center" }}>{names[childParam]}</h1>
 
-      <table border="1" style={{ width: "100%", textAlign: "center", fontSize: "18px" }}>
+      <table style={{ width: "100%", textAlign: "center", fontSize: "18px" }}>
         <thead>
           <tr>
             <th>日付</th>
@@ -178,9 +196,11 @@ function App() {
                   return (
                     <td key={i}
                       style={{
-                        background: done ? "lightgreen" : "#ffcccc",
+                        background: done ? "#4CAF50" : "#FF6B6B",
+                        color: "white",
+                        fontSize: "20px",
                         cursor: "pointer",
-                        height: "50px"
+                        height: "60px"
                       }}
                       onClick={() => toggleRecord(d, t.name)}
                     >
