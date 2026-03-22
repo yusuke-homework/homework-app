@@ -2,13 +2,16 @@ import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { ref, push, set, onValue, remove } from "firebase/database";
 
-const SECRET_KEY = "family2026secret";
+const SECRET_KEY = "family2026secret"; // ★【① URLの鍵】
 
 function App() {
-  const params = new URLSearchParams(window.location.search);
-  const childParam = params.get("child");
-  const key = params.get("key");
 
+  // ★【② URLルールの取得部分】←超重要
+  const params = new URLSearchParams(window.location.search);
+  const childParam = params.get("child"); // ← child=Aなど
+  const key = params.get("key");           // ← key=xxxxx
+
+  // ★【③ アクセス制御】
   if (childParam && key !== SECRET_KEY) {
     return <h1>アクセスできません</h1>;
   }
@@ -21,6 +24,8 @@ function App() {
   };
 
   const [allowEditAll, setAllowEditAll] = useState(false);
+  const [usePrice, setUsePrice] = useState(true); // ★追加
+
   const [names, setNames] = useState({ A: "A", B: "B", C: "C" });
   const [period, setPeriod] = useState({ start: "", end: "" });
 
@@ -35,7 +40,13 @@ function App() {
   useEffect(() => {
     onValue(ref(db, "names"), s => s.val() && setNames(s.val()));
     onValue(ref(db, "period"), s => s.val() && setPeriod(s.val()));
-    onValue(ref(db, "settings"), s => s.val() && setAllowEditAll(s.val().allowEditAll));
+
+    onValue(ref(db, "settings"), s => {
+      if (s.val()) {
+        setAllowEditAll(s.val().allowEditAll);
+        setUsePrice(s.val().usePrice ?? true);
+      }
+    });
 
     ["A","B","C"].forEach(c=>{
       onValue(ref(db,"tasks/"+c), s=>{
@@ -52,7 +63,13 @@ function App() {
 
   const saveNames=()=>set(ref(db,"names"),names)
   const savePeriod=()=>set(ref(db,"period"),period)
-  const saveSetting=()=>set(ref(db,"settings"),{allowEditAll})
+
+  const saveSetting=()=>{
+    set(ref(db,"settings"),{
+      allowEditAll,
+      usePrice
+    })
+  }
 
   const addTask=()=>{
     const r=push(ref(db,"tasks/"+child))
@@ -60,7 +77,6 @@ function App() {
     setTask("");setMemo("");setPrice("")
   }
 
-  // ✅ ← エラーの原因だった箇所（修正済み）
   const deleteTask = (c, id) => remove(ref(db, `tasks/${c}/${id}`));
 
   const getDates=()=>{
@@ -132,37 +148,53 @@ function App() {
         <input type="date" onChange={e=>setPeriod({...period,end:e.target.value})}/>
         <button onClick={savePeriod}>保存</button>
 
-        <h2>入力制限</h2>
+        <h2>機能設定</h2>
         <label>
           <input type="checkbox" checked={allowEditAll}
             onChange={e=>setAllowEditAll(e.target.checked)}/>
-          過去・未来も入力可能
+          過去・未来入力OK
         </label>
+
+        <br/>
+
+        <label>
+          <input type="checkbox" checked={usePrice}
+            onChange={e=>setUsePrice(e.target.checked)}/>
+          金額機能ON/OFF
+        </label>
+
+        <br/>
         <button onClick={saveSetting}>保存</button>
 
         <h2>宿題登録</h2>
         <select onChange={e=>setChild(e.target.value)}>
           <option>A</option><option>B</option><option>C</option>
         </select>
+
         <input placeholder="宿題" value={task} onChange={e=>setTask(e.target.value)}/>
         <input placeholder="補足" value={memo} onChange={e=>setMemo(e.target.value)}/>
-        <input placeholder="単価" value={price} onChange={e=>setPrice(e.target.value)}/>
+        {usePrice && (
+          <input placeholder="単価" value={price} onChange={e=>setPrice(e.target.value)}/>
+        )}
+
         <button onClick={addTask}>追加</button>
 
         {["A","B","C"].map(c=>(
           <div key={c}>
             <h3>{names[c]}</h3>
-            <p>合計：{calcTotal(c)}円</p>
+
+            {usePrice && <p>合計：{calcTotal(c)}円</p>}
+
             {tasks[c] && Object.entries(tasks[c]).map(([id,t])=>(
               <div key={id}>
-                {t.name}（{t.price}円）
+                {t.name} {usePrice && `（${t.price}円）`}
                 <button onClick={()=>deleteTask(c,id)}>削除</button>
               </div>
             ))}
           </div>
         ))}
 
-        <h2>全体合計：{calcAllTotal()}円</h2>
+        {usePrice && <h2>全体合計：{calcAllTotal()}円</h2>}
       </div>
     )
   }
@@ -185,8 +217,7 @@ function App() {
       <table style={{
         minWidth:"900px",
         textAlign:"center",
-        background:"white",
-        borderRadius:"10px"
+        background:"white"
       }}>
         <thead>
           <tr>
@@ -200,7 +231,7 @@ function App() {
               </th>
             ))}
             <th>状態</th>
-            <th>金額</th>
+            {usePrice && <th>金額</th>}
           </tr>
         </thead>
 
@@ -221,11 +252,7 @@ function App() {
                       style={{
                         background:done?"#4CAF50":"#FF6B6B",
                         color:"#fff",
-                        fontSize:"24px",
                         height:"70px",
-                        borderRadius:"10px",
-                        transform:done?"scale(1.1)":"scale(1)",
-                        transition:"0.2s",
                         cursor:"pointer"
                       }}>
                       {done?"⭐":""}
@@ -233,8 +260,8 @@ function App() {
                   )
                 })}
 
-                <td>{allDone?"🎉 ぜんぶおわり！":"まだのこってる！"}</td>
-                <td>{sum}円</td>
+                <td>{allDone?"🎉ぜんぶおわり！":"まだのこってる！"}</td>
+                {usePrice && <td>{sum}円</td>}
               </tr>
             )
           })}
@@ -243,7 +270,7 @@ function App() {
         <tfoot>
           <tr>
             <td colSpan={list.length+2}>合計</td>
-            <td>{calcTotal(childParam)}円</td>
+            {usePrice && <td>{calcTotal(childParam)}円</td>}
           </tr>
         </tfoot>
       </table>
