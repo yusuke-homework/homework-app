@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
-import { ref, push, set, onValue, remove, update } from "firebase/database";
+import { ref, push, set, onValue, remove } from "firebase/database";
 
 const SECRET_KEY = "family2026secret";
 
@@ -13,10 +13,19 @@ function App() {
     return <h1>アクセスできません</h1>;
   }
 
+  const today = new Date().toISOString().split("T")[0];
+
+  const playSound = () => {
+    const audio = new Audio("/coin.mp3");
+    audio.play();
+  };
+
+  const [allowEditAll, setAllowEditAll] = useState(false);
   const [names, setNames] = useState({ A: "A", B: "B", C: "C" });
   const [period, setPeriod] = useState({ start: "", end: "" });
 
   const [task, setTask] = useState("");
+  const [memo, setMemo] = useState("");
   const [price, setPrice] = useState("");
   const [child, setChild] = useState("A");
 
@@ -24,432 +33,222 @@ function App() {
   const [records, setRecords] = useState([]);
 
   useEffect(() => {
-    onValue(ref(db, "names"), (s) => s.val() && setNames(s.val()));
-    onValue(ref(db, "period"), (s) => s.val() && setPeriod(s.val()));
+    onValue(ref(db, "names"), s => s.val() && setNames(s.val()));
+    onValue(ref(db, "period"), s => s.val() && setPeriod(s.val()));
+    onValue(ref(db, "settings"), s => s.val() && setAllowEditAll(s.val().allowEditAll));
 
-    ["A", "B", "C"].forEach((c) => {
-      onValue(ref(db, "tasks/" + c), (s) => {
-        setTasks((prev) => ({ ...prev, [c]: s.val() || {} }));
-      });
-    });
+    ["A","B","C"].forEach(c=>{
+      onValue(ref(db,"tasks/"+c), s=>{
+        setTasks(prev=>({...prev,[c]:s.val()||{}}))
+      })
+    })
 
-    onValue(ref(db, "records"), (s) => {
-      const data = s.val();
-      const list = data
-        ? Object.entries(data).map(([id, v]) => ({ id, ...v }))
-        : [];
-      setRecords(list);
-    });
-  }, []);
+    onValue(ref(db,"records"), s=>{
+      const data=s.val()
+      const list=data?Object.entries(data).map(([id,v])=>({id,...v})):[]
+      setRecords(list)
+    })
+  },[])
 
-  const saveNames = () => set(ref(db, "names"), names);
-  const savePeriod = () => set(ref(db, "period"), period);
+  const saveNames=()=>set(ref(db,"names"),names)
+  const savePeriod=()=>set(ref(db,"period"),period)
+  const saveSetting=()=>set(ref(db,"settings"),{allowEditAll})
 
-  const addTask = () => {
-    const newRef = push(ref(db, "tasks/" + child));
-    set(newRef, { name: task, price: Number(price) });
-    setTask("");
-    setPrice("");
-  };
+  const addTask=()=>{
+    const r=push(ref(db,"tasks/"+child))
+    set(r,{name:task,memo:memo,price:Number(price)})
+    setTask("");setMemo("");setPrice("")
+  }
 
-  const deleteTask = (c, id) => remove(ref(db, `tasks/${c}/${id}`);
-  const updateTask = (c, id, p) =>
-    update(ref(db, `tasks/${c}/${id}`), { price: Number(p) });
+  // ✅ ← エラーの原因だった箇所（修正済み）
+  const deleteTask = (c, id) => remove(ref(db, `tasks/${c}/${id}`));
 
-  const toggleRecord = (date, taskName) => {
-    const exist = records.find(
-      (r) => r.child === childParam && r.date === date && r.task === taskName
-    );
-
-    if (exist) {
-      remove(ref(db, `records/${exist.id}`));
-    } else {
-      const newRef = push(ref(db, "records"));
-      set(newRef, { child: childParam, date, task: taskName, done: true });
+  const getDates=()=>{
+    if(!period.start||!period.end)return[]
+    let d=new Date(period.start)
+    const end=new Date(period.end)
+    const arr=[]
+    while(d<=end){
+      arr.push(d.toISOString().split("T")[0])
+      d.setDate(d.getDate()+1)
     }
-  };
+    return arr
+  }
 
-  const getDates = () => {
-    if (!period.start || !period.end) return [];
-    const dates = [];
-    let d = new Date(period.start);
-    const end = new Date(period.end);
-    while (d <= end) {
-      dates.push(d.toISOString().split("T")[0]);
-      d.setDate(d.getDate() + 1);
+  const formatDate=(d)=>{
+    const dt=new Date(d)
+    return `${dt.getMonth()+1}/${dt.getDate()}`
+  }
+
+  const isDone=(date,task)=>{
+    return records.some(r=>r.child===childParam&&r.date===date&&r.task===task)
+  }
+
+  const toggle=(date,task)=>{
+    if(!allowEditAll && date!==today)return
+
+    const exist=records.find(r=>r.child===childParam&&r.date===date&&r.task===task)
+    if(exist){
+      remove(ref(db,"records/"+exist.id))
+    }else{
+      const r=push(ref(db,"records"))
+      set(r,{child:childParam,date,task,done:true})
+      playSound();
     }
-    return dates;
-  };
+  }
 
-  const isDone = (date, taskName) => {
-    return records.some(
-      (r) => r.child === childParam && r.date === date && r.task === taskName
-    );
-  };
+  const calcRow=(date,c)=>{
+    return Object.values(tasks[c]).reduce((sum,t)=>{
+      if(records.some(r=>r.child===c&&r.date===date&&r.task===t.name)){
+        return sum+t.price
+      }
+      return sum
+    },0)
+  }
 
-  const calcRowSum = (date, childKey) => {
-    return Object.values(tasks[childKey]).reduce((sum, t) => {
-      if (isDone(date, t.name)) return sum + t.price;
-      return sum;
-    }, 0);
-  };
+  const calcTotal=(c)=>{
+    return getDates().reduce((s,d)=>s+calcRow(d,c),0)
+  }
 
-  const calcTotal = (childKey) => {
-    return getDates().reduce((sum, d) => sum + calcRowSum(d, childKey), 0);
-  };
+  const calcAllTotal=()=>{
+    return ["A","B","C"].reduce((sum,c)=>sum+calcTotal(c),0)
+  }
 
-  const calcProgress = (childKey) => {
-    const total = getDates().length * Object.keys(tasks[childKey]).length;
-    const done = records.filter((r) => r.child === childKey).length;
-    if (total === 0) return 0;
-    return Math.round((done / total) * 100);
-  };
-
-  if (!childParam) {
-    return (
-      <div style={{ padding: 20 }}>
+  // 👨 親画面
+  if(!childParam){
+    return(
+      <div style={{padding:20,textAlign:"left"}}>
         <h1>親ダッシュボード</h1>
 
         <h2>名前</h2>
-        {["A", "B", "C"].map((c) => (
-          <input
-            key={c}
-            value={names[c]}
-            onChange={(e) =>
-              setNames({ ...names, [c]: e.target.value })
-            }
-          />
+        {["A","B","C"].map(c=>(
+          <input key={c} value={names[c]}
+            onChange={e=>setNames({...names,[c]:e.target.value})}/>
         ))}
         <button onClick={saveNames}>保存</button>
 
         <h2>期間</h2>
-        <input type="date" onChange={(e) =>
-          setPeriod({ ...period, start: e.target.value })
-        } />
-        <input type="date" onChange={(e) =>
-          setPeriod({ ...period, end: e.target.value })
-        } />
+        <input type="date" onChange={e=>setPeriod({...period,start:e.target.value})}/>
+        <input type="date" onChange={e=>setPeriod({...period,end:e.target.value})}/>
         <button onClick={savePeriod}>保存</button>
 
+        <h2>入力制限</h2>
+        <label>
+          <input type="checkbox" checked={allowEditAll}
+            onChange={e=>setAllowEditAll(e.target.checked)}/>
+          過去・未来も入力可能
+        </label>
+        <button onClick={saveSetting}>保存</button>
+
         <h2>宿題登録</h2>
-        <select onChange={(e) => setChild(e.target.value)}>
+        <select onChange={e=>setChild(e.target.value)}>
           <option>A</option><option>B</option><option>C</option>
         </select>
-        <input placeholder="宿題" onChange={(e) => setTask(e.target.value)} />
-        <input placeholder="単価" onChange={(e) => setPrice(e.target.value)} />
+        <input placeholder="宿題" value={task} onChange={e=>setTask(e.target.value)}/>
+        <input placeholder="補足" value={memo} onChange={e=>setMemo(e.target.value)}/>
+        <input placeholder="単価" value={price} onChange={e=>setPrice(e.target.value)}/>
         <button onClick={addTask}>追加</button>
 
-        {["A", "B", "C"].map((c) => {
-          const progress = calcProgress(c);
-          return (
-            <div key={c} style={{
-              border: "1px solid #ccc",
-              borderRadius: "10px",
-              padding: "10px",
-              margin: "10px"
-            }}>
-              <h3>{names[c]}</h3>
-
-              <div style={{ background: "#eee", height: "20px" }}>
-                <div style={{
-                  width: progress + "%",
-                  background: "green",
-                  height: "100%"
-                }} />
+        {["A","B","C"].map(c=>(
+          <div key={c}>
+            <h3>{names[c]}</h3>
+            <p>合計：{calcTotal(c)}円</p>
+            {tasks[c] && Object.entries(tasks[c]).map(([id,t])=>(
+              <div key={id}>
+                {t.name}（{t.price}円）
+                <button onClick={()=>deleteTask(c,id)}>削除</button>
               </div>
+            ))}
+          </div>
+        ))}
 
-              <p>{progress}%</p>
-              <p>合計：{calcTotal(c)}円</p>
-            </div>
-          );
-        })}
+        <h2>全体合計：{calcAllTotal()}円</h2>
       </div>
-    );
+    )
   }
 
-  const dates = getDates();
-  const taskList = Object.values(tasks[childParam] || {});
+  // 👦 子供画面
+  const dates=getDates()
+  const list=Object.values(tasks[childParam]||{})
 
-  return (
-    <div style={{ padding: 10 }}>
-      <h1 style={{ textAlign: "center" }}>{names[childParam]}</h1>
+  return(
+    <div style={{
+      overflowX:"auto",
+      background:"linear-gradient(to right,#89f7fe,#66a6ff)",
+      minHeight:"100vh",
+      padding:"10px"
+    }}>
+      <h1 style={{textAlign:"center",color:"white"}}>
+        🎮 {names[childParam]}
+      </h1>
 
-      <table style={{ width: "100%", textAlign: "center", fontSize: "18px" }}>
+      <table style={{
+        minWidth:"900px",
+        textAlign:"center",
+        background:"white",
+        borderRadius:"10px"
+      }}>
         <thead>
           <tr>
             <th>日付</th>
-            {taskList.map((t, i) => <th key={i}>{t.name}</th>)}
+            {list.map((t,i)=>(
+              <th key={i}>
+                <div>{t.name}</div>
+                <div style={{fontSize:"12px"}}>
+                  {t.memo?.slice(0,4)}
+                </div>
+              </th>
+            ))}
             <th>状態</th>
             <th>金額</th>
           </tr>
         </thead>
-        <tbody>
-          {dates.map((d) => {
-            const allDone = taskList.every((t) => isDone(d, t.name));
-            const sum = calcRowSum(d, childParam);
 
-            return (
+        <tbody>
+          {dates.map(d=>{
+            const sum=calcRow(d,childParam)
+            const allDone=list.every(t=>isDone(d,t.name))
+
+            return(
               <tr key={d}>
-                <td>{d}</td>
-                {taskList.map((t, i) => {
-                  const done = isDone(d, t.name);
-                  return (
+                <td>{formatDate(d)}</td>
+
+                {list.map((t,i)=>{
+                  const done=isDone(d,t.name)
+                  return(
                     <td key={i}
+                      onClick={()=>toggle(d,t.name)}
                       style={{
-                        background: done ? "#4CAF50" : "#FF6B6B",
-                        color: "white",
-                        fontSize: "20px",
-                        cursor: "pointer",
-                        height: "60px"
-                      }}
-                      onClick={() => toggleRecord(d, t.name)}
-                    >
-                      {done ? "○" : ""}
+                        background:done?"#4CAF50":"#FF6B6B",
+                        color:"#fff",
+                        fontSize:"24px",
+                        height:"70px",
+                        borderRadius:"10px",
+                        transform:done?"scale(1.1)":"scale(1)",
+                        transition:"0.2s",
+                        cursor:"pointer"
+                      }}>
+                      {done?"⭐":""}
                     </td>
-                  );
+                  )
                 })}
-                <td>{allDone ? "ぜんぶおわり！" : "まだのこっているよ！"}</td>
+
+                <td>{allDone?"🎉 ぜんぶおわり！":"まだのこってる！"}</td>
                 <td>{sum}円</td>
               </tr>
-            );
+            )
           })}
         </tbody>
+
         <tfoot>
           <tr>
-            <td colSpan={taskList.length + 2}>合計</td>
+            <td colSpan={list.length+2}>合計</td>
             <td>{calcTotal(childParam)}円</td>
           </tr>
         </tfoot>
       </table>
     </div>
-  );
-}
-
-export default App;import { useState, useEffect } from "react";
-import { db } from "./firebase";
-import { ref, push, set, onValue, remove, update } from "firebase/database";
-
-const SECRET_KEY = "family2026secret";
-
-function App() {
-  const params = new URLSearchParams(window.location.search);
-  const childParam = params.get("child");
-  const key = params.get("key");
-
-  if (childParam && key !== SECRET_KEY) {
-    return <h1>アクセスできません</h1>;
-  }
-
-  const [names, setNames] = useState({ A: "A", B: "B", C: "C" });
-  const [period, setPeriod] = useState({ start: "", end: "" });
-
-  const [task, setTask] = useState("");
-  const [price, setPrice] = useState("");
-  const [child, setChild] = useState("A");
-
-  const [tasks, setTasks] = useState({ A: {}, B: {}, C: {} });
-  const [records, setRecords] = useState([]);
-
-  useEffect(() => {
-    onValue(ref(db, "names"), (s) => s.val() && setNames(s.val()));
-    onValue(ref(db, "period"), (s) => s.val() && setPeriod(s.val()));
-
-    ["A", "B", "C"].forEach((c) => {
-      onValue(ref(db, "tasks/" + c), (s) => {
-        setTasks((prev) => ({ ...prev, [c]: s.val() || {} }));
-      });
-    });
-
-    onValue(ref(db, "records"), (s) => {
-      const data = s.val();
-      const list = data
-        ? Object.entries(data).map(([id, v]) => ({ id, ...v }))
-        : [];
-      setRecords(list);
-    });
-  }, []);
-
-  const saveNames = () => set(ref(db, "names"), names);
-  const savePeriod = () => set(ref(db, "period"), period);
-
-  const addTask = () => {
-    const newRef = push(ref(db, "tasks/" + child));
-    set(newRef, { name: task, price: Number(price) });
-    setTask("");
-    setPrice("");
-  };
-
-  const deleteTask = (c, id) => remove(ref(db, `tasks/${c}/${id}`);
-  const updateTask = (c, id, p) =>
-    update(ref(db, `tasks/${c}/${id}`), { price: Number(p) });
-
-  const toggleRecord = (date, taskName) => {
-    const exist = records.find(
-      (r) => r.child === childParam && r.date === date && r.task === taskName
-    );
-
-    if (exist) {
-      remove(ref(db, `records/${exist.id}`));
-    } else {
-      const newRef = push(ref(db, "records"));
-      set(newRef, { child: childParam, date, task: taskName, done: true });
-    }
-  };
-
-  const getDates = () => {
-    if (!period.start || !period.end) return [];
-    const dates = [];
-    let d = new Date(period.start);
-    const end = new Date(period.end);
-    while (d <= end) {
-      dates.push(d.toISOString().split("T")[0]);
-      d.setDate(d.getDate() + 1);
-    }
-    return dates;
-  };
-
-  const isDone = (date, taskName) => {
-    return records.some(
-      (r) => r.child === childParam && r.date === date && r.task === taskName
-    );
-  };
-
-  const calcRowSum = (date, childKey) => {
-    return Object.values(tasks[childKey]).reduce((sum, t) => {
-      if (isDone(date, t.name)) return sum + t.price;
-      return sum;
-    }, 0);
-  };
-
-  const calcTotal = (childKey) => {
-    return getDates().reduce((sum, d) => sum + calcRowSum(d, childKey), 0);
-  };
-
-  const calcProgress = (childKey) => {
-    const total = getDates().length * Object.keys(tasks[childKey]).length;
-    const done = records.filter((r) => r.child === childKey).length;
-    if (total === 0) return 0;
-    return Math.round((done / total) * 100);
-  };
-
-  if (!childParam) {
-    return (
-      <div style={{ padding: 20 }}>
-        <h1>親ダッシュボード</h1>
-
-        <h2>名前</h2>
-        {["A", "B", "C"].map((c) => (
-          <input
-            key={c}
-            value={names[c]}
-            onChange={(e) =>
-              setNames({ ...names, [c]: e.target.value })
-            }
-          />
-        ))}
-        <button onClick={saveNames}>保存</button>
-
-        <h2>期間</h2>
-        <input type="date" onChange={(e) =>
-          setPeriod({ ...period, start: e.target.value })
-        } />
-        <input type="date" onChange={(e) =>
-          setPeriod({ ...period, end: e.target.value })
-        } />
-        <button onClick={savePeriod}>保存</button>
-
-        <h2>宿題登録</h2>
-        <select onChange={(e) => setChild(e.target.value)}>
-          <option>A</option><option>B</option><option>C</option>
-        </select>
-        <input placeholder="宿題" onChange={(e) => setTask(e.target.value)} />
-        <input placeholder="単価" onChange={(e) => setPrice(e.target.value)} />
-        <button onClick={addTask}>追加</button>
-
-        {["A", "B", "C"].map((c) => {
-          const progress = calcProgress(c);
-          return (
-            <div key={c} style={{
-              border: "1px solid #ccc",
-              borderRadius: "10px",
-              padding: "10px",
-              margin: "10px"
-            }}>
-              <h3>{names[c]}</h3>
-
-              <div style={{ background: "#eee", height: "20px" }}>
-                <div style={{
-                  width: progress + "%",
-                  background: "green",
-                  height: "100%"
-                }} />
-              </div>
-
-              <p>{progress}%</p>
-              <p>合計：{calcTotal(c)}円</p>
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  const dates = getDates();
-  const taskList = Object.values(tasks[childParam] || {});
-
-  return (
-    <div style={{ padding: 10 }}>
-      <h1 style={{ textAlign: "center" }}>{names[childParam]}</h1>
-
-      <table style={{ width: "100%", textAlign: "center", fontSize: "18px" }}>
-        <thead>
-          <tr>
-            <th>日付</th>
-            {taskList.map((t, i) => <th key={i}>{t.name}</th>)}
-            <th>状態</th>
-            <th>金額</th>
-          </tr>
-        </thead>
-        <tbody>
-          {dates.map((d) => {
-            const allDone = taskList.every((t) => isDone(d, t.name));
-            const sum = calcRowSum(d, childParam);
-
-            return (
-              <tr key={d}>
-                <td>{d}</td>
-                {taskList.map((t, i) => {
-                  const done = isDone(d, t.name);
-                  return (
-                    <td key={i}
-                      style={{
-                        background: done ? "#4CAF50" : "#FF6B6B",
-                        color: "white",
-                        fontSize: "20px",
-                        cursor: "pointer",
-                        height: "60px"
-                      }}
-                      onClick={() => toggleRecord(d, t.name)}
-                    >
-                      {done ? "○" : ""}
-                    </td>
-                  );
-                })}
-                <td>{allDone ? "ぜんぶおわり！" : "まだのこっているよ！"}</td>
-                <td>{sum}円</td>
-              </tr>
-            );
-          })}
-        </tbody>
-        <tfoot>
-          <tr>
-            <td colSpan={taskList.length + 2}>合計</td>
-            <td>{calcTotal(childParam)}円</td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-  );
+  )
 }
 
 export default App;
